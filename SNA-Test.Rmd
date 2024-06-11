@@ -1,0 +1,167 @@
+---
+title: "SNA-Test"
+author: "Erica Griffin"
+date: "2024-06-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Add Variables to survey data
+```{r}
+survey <- read.csv("SurveyDolphin_20240321.csv")
+library(dplyr)
+survey <- survey %>%
+  rename(ID = Dolphin.ID)
+result <- df %>%
+  group_by(ID) %>%
+  summarize(
+    earliest_date = min(Observation.Date),
+    latest_date = max(Observation.Date),
+    total_observations = n()
+  )
+
+```
+## Calculate Adult Network Centrality
+```{r}
+library(igraph)
+library(SocGen)
+library(foreach)
+library(doParallel)
+```
+
+```{r}
+date_range <- unique(survey[, c("first_obs_date", "last_obs_date")])
+
+#add date diff
+date_range$datediff <- as.numeric((date_range$last_obs_date - date_range$first_obs_date) / 365.25)
+
+date_range$date_key <- 1:nrow(date_range)
+
+survey <- merge(survey, date_range, sort = FALSE)
+``` 
+
+Set up empty dataframe
+```{r}
+nf <- nrow(surveys)
+real_network_metrics <- data.frame(ego = survey$Dolphin.ID,
+                                 degree = numeric(nf),
+                                 strength = numeric(nf),
+                                 eigen = numeric(nf),
+                                 closeness = numeric(nf),
+                                 network_size = numeric(nf),
+                                 gc_size = numeric(nf))
+
+for (i in 1:nrow(date_range)) {
+
+  centrality_surveys <- sightings[sightings$Date >= date_range$first_obs_date[i] &
+                                  sightings$Date <= date_range$last_obs_date[i], ]
+
+  central_network <- half_weight(sightings = centrality_surveys,
+                               group_variable = "Observation.ID",
+                               dates = "Date",
+                               IDs = "Dolphin.ID")
+
+  g <- graph.adjacency(central_network, mode = "undirected", weighted = TRUE, diag = FALSE)
+
+  network_size <- vcount(g)
+
+  graphs <- decompose.graph(g)
+  largest <- which.max(sapply(graphs, vcount))
+
+  g1 <- graphs[[largest]]
+  gc_size <- vcount(g1)
+
+  if (i == 3) {print(distance_table(g)); print(mean_distance(g))} # whole network
+
+  egos <- focal_adults$Dolphin.ID[focal_adults$date_key == i]
+
+  #mini_loop
+  for (j in egos) {
+    #calc network metrics here
+    real_network_metrics[real_network_metrics$ego == j, "degree"] <- degree(g, j)
+    real_network_metrics[real_network_metrics$ego == j, "strength"] <- strength(g, j)
+    real_network_metrics[real_network_metrics$ego == j, "eigen"] <- eigen_centrality(g)$vector[j]
+    real_network_metrics[real_network_metrics$ego == j, "closeness"] <- closeness(g,
+                                                                                v = j,
+                                                                                weights = 1 / E(g)$weight,
+                                                                                normalized = TRUE)
+    #report network size and giant component size
+    real_network_metrics[real_network_metrics$ego == j, "network_size"] <- network_size
+    real_network_metrics[real_network_metrics$ego == j, "gc_size"] <- gc_size
+
+    #note: closeness centrality is not well-defined for disconnected graphs
+
+  }
+}
+```
+Repeat for random
+```{r}
+load("kfinal1000.RData")
+
+cl <- makeCluster(detectCores() - 1)
+clusterEvalQ(cl, {library(SocGen);library(igraph)})
+clusterExport(cl, c("kfinal", "date_range", "focal_adults", "nf"))
+registerDoParallel(cl)
+
+starttime <- Sys.time()
+
+central_rand <- foreach(n = 1:length(kfinal), .errorhandling = 'pass') %dopar% {
+
+  kfinal1 <- kfinal[[n]]
+  kfinal1$Date <- substring(kfinal1$group, 1, 10)
+
+  network_metrics <- data.frame(ego = focal_adults$Dolphin.ID,
+                              degree = numeric(nf),
+                              strength = numeric(nf),
+                              eigen = numeric(nf),
+                              closeness = numeric(nf))
+
+  for (i in 1:nrow(date_range)) {
+
+    centrality_surveys <- kfinal1[kfinal1$Date >= date_range$first_obs_date[i] &
+                                  kfinal1$Date <= date_range$last_obs_date[i], ]
+
+    central_network <- half_weight(sightings = centrality_surveys,
+                                 group_variable = "group",
+                                 dates = "Date",
+                                 IDs = "id")
+
+    g <- graph.adjacency(central_network, mode = "undirected", weighted = TRUE, diag = FALSE)
+
+    egos <- focal_adults$Dolphin.ID[focal_adults$date_key == i]
+
+    #mini_loop
+    for (j in egos) {
+      #calc network metrics here
+      network_metrics[network_metrics$ego == j, "degree"] <- degree(g, j)
+      network_metrics[network_metrics$ego == j, "strength"] <- strength(g, j)
+      network_metrics[network_metrics$ego == j, "eigen"] <- eigen_centrality(g)$vector[j]
+      network_metrics[network_metrics$ego == j, "closeness"] <- closeness(g,
+                                                                        v = j,
+                                                                        weights = 1 / E(g)$weight,
+                                                                        normalized = TRUE)
+
+      #note: closeness centrality is not well-defined for disconnected graphs
+    }
+
+    }
+  # cat(paste0(" network complete for number ", n, "\n")) #if printing to file
+
+  network_metrics
+}
+
+endtime <- Sys.time()
+
+stopCluster(cl)
+
+endtime - starttime #run time ~1 hour
+
+beepr::beep(2)
+```
+Save relevant objects
+```{r}
+focal_adults <- focal_adults[, names(indiv_covars)]
+save(real_network_metrics, central_rand, focal_adults, file = "centrality_networks.RData")
+```
