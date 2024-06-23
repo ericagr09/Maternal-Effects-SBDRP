@@ -15,7 +15,8 @@ df_moms <- df %>% semi_join(mom_list, by = "Mother.ID") # filter dataset to only
 start_date_preMHW <- as.Date("1955-01-01") # start datw for pre MHW = start of data collection 
 end_date_preMHW <- as.Date("2010-12-31") #  end date as before MHW
 df_preMHW <- df_moms %>% filter(Birth.Date >= start_date_preMHW & Birth.Date <= end_date_preMHW) # 93 offspring born before 2011 to moms who also had offspring post MHW. 
-
+df_all <- bind_rows(df_preMHW, df_postMHW) # create df with all obs (pre and post)
+write.csv(df_all, "df_all.csv")
 
 
 
