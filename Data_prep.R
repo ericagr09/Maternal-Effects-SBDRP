@@ -1,6 +1,7 @@
 #File for cleaning life history data
 # Start by getting sample size 
 library(dplyr)
+library(tidyverse)
 df <- read.csv("LifeHistory_20240604.csv")
 # create df that includes only offspring born after the heatwave. 
 df$Birth.Date <- as.Date(df$Birth.Date, format="%Y-%m-%d") # convert column to date format
@@ -16,7 +17,19 @@ start_date_preMHW <- as.Date("1955-01-01") # start datw for pre MHW = start of d
 end_date_preMHW <- as.Date("2010-12-31") #  end date as before MHW
 df_preMHW <- df_moms %>% filter(Birth.Date >= start_date_preMHW & Birth.Date <= end_date_preMHW) # 93 offspring born before 2011 to moms who also had offspring post MHW. 
 df_all <- bind_rows(df_preMHW, df_postMHW) # create df with all obs (pre and post)
+df_all <- df_all %>% filter(!(is.na(Weaning.Date) | Weaning.Date == "")) # keep only individuals with known weaning date
 write.csv(df_all, "df_all.csv")
-
+grouped_df <- df_all %>%
+  group_by(Mother.ID) %>%
+  summarize(
+    offspring = list(Dolphin.ID),
+    birth_date = list(Birth.Date)
+  )
+included_obs <- grouped_df %>%
+  mutate(offspring = map(offspring, ~ as.character(.)),
+         birth_date = map(birth_date, ~ as.character(.))) %>%
+  unnest_wider(offspring, names_sep = "_") %>%
+  unnest_wider(birth_date, names_sep = "_") %>%
+  replace(is.na(.), "")
 
 
